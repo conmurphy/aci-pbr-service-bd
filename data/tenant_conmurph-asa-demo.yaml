@@ -1,0 +1,136 @@
+---
+apic:
+  tenants:
+    - name: conmurph-asa-demo
+
+      vrfs:
+        - name: production
+
+      bridge_domains: 
+        - name: 192.168.10.0
+          vrf: production
+          subnets: 
+          - ip: 192.168.10.254/24 
+        - name: 192.168.20.0
+          vrf: production
+          subnets: 
+          - ip: 192.168.20.254/24 
+        - name: fw-client
+          vrf: production
+          subnets: 
+          - ip: 172.16.10.254/24
+        - name: fw-server
+          vrf: production
+          subnets: 
+          - ip: 172.16.20.254/24
+
+
+      application_profiles:
+        - name: asa-demo
+          endpoint_groups:
+            - name: client
+              bridge_domain: 192.168.10.0
+              contracts:
+                consumers:
+                  - dev-web-db
+              vmware_vmm_domains:
+                - name: DM_VMM
+                  delimiter: '|'
+                  deployment_immediacy: immediate
+                  resolution_immediacy: immediate
+            - name: server
+              bridge_domain: 192.168.20.0
+              contracts:
+                providers:
+                  - dev-web-db
+              vmware_vmm_domains:
+                - name: DM_VMM
+                  delimiter: '|'
+                  deployment_immediacy: immediate
+                  resolution_immediacy: immediate
+
+      filters:
+        - name: icmp
+          entries:
+            - name: icmp
+              ethertype: ip
+              protocol: icmp
+        - name: web
+          entries:
+            - name: http
+              ethertype: ip
+              protocol: tcp
+              destination_from_port: http
+              destination_to_port: http
+
+      contracts:
+        - name: dev-web-db
+          subjects:
+            - name: icmp
+              filters:
+                - filter: icmp
+              service_graph: conmurph-asa-routed
+            - name: web
+              filters:
+                - filter: web
+      
+      services:
+        l4l7_devices:
+          - name: asav
+            context_aware: single-Context
+            type: VIRTUAL
+            vmware_vmm_domain: DM_VMM
+            function: GoTo
+            managed: false
+            service_type: FW
+            concrete_devices:
+              - name: asav
+                vcenter_name: vCenter_Innovation_Lab
+                vm_name: conmurph-asav-1-routed-1
+                interfaces:
+                  - name: client
+                    vnic_name: Network adapter 2
+                  - name: server
+                    vnic_name: Network adapter 3
+            logical_interfaces:
+              - name: client
+                concrete_interfaces:
+                  - device: asav
+                    interface_name: client
+              - name: server
+                concrete_interfaces:
+                  - device: asav
+                    interface_name: server
+        redirect_policies:
+          - name: client
+            l3_destinations:
+              - ip: 172.16.10.1
+                mac: 00:50:56:93:42:5A
+          - name: server
+            l3_destinations:
+              - ip: 172.16.20.1
+                mac: 00:50:56:93:A2:51
+        service_graph_templates:
+          - name: conmurph-asa-routed
+            template_type: FW_ROUTED
+            redirect: true
+            device:
+              tenant: conmurph-asa-demo
+              name: asav
+        device_selection_policies:
+          - contract: dev-web-db
+            service_graph_template: conmurph-asa-routed
+            consumer:
+              l3_destination: true
+              redirect_policy:
+                name: client
+              logical_interface: client
+              bridge_domain:
+                name: fw-client
+            provider:
+              l3_destination: true
+              redirect_policy:
+                name: server
+              logical_interface: server
+              bridge_domain:
+                name: fw-server
